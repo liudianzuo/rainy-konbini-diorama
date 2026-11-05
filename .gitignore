@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Blender
+*.blend1
+*.blend2
+*.blend@
+
+# Operating system / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs and temporary output
+*.log
+tmp/
+temp/
+.cache/
+
+# Local browser and test artifacts
+edge-*/
+chrome-*/
+playwright-report/
+test-results/
+shot_*.js
+*.local
+
+# Preserved originals / private local backups
+.local_originals/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+secrets/
