@@ -3,16 +3,24 @@
   'use strict';
 
   const canvasHost = document.getElementById('stage');
-  const W = () => window.innerWidth;
-  const H = () => window.innerHeight;
+  const viewport = window.visualViewport || null;
+  const W = () => Math.round(viewport ? viewport.width : window.innerWidth);
+  const H = () => Math.round(viewport ? viewport.height : window.innerHeight);
+
+  // Phones / tablets: fewer particles, lower internal resolution, gentler bloom.
+  const isTouch = (navigator.maxTouchPoints || 0) > 0 ||
+    (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+  const smallScreen = () => Math.min(W(), H()) < 700;
+  const deviceCap = isTouch || smallScreen() ? 1.5 : 1.75;
+  let dprCap = deviceCap;
 
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: !isTouch,
     alpha: false,
     powerPreference: 'high-performance'
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
-  renderer.setSize(W(), H());
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, dprCap));
+  renderer.setSize(W(), H(), false);
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.setClearColor(0x070f1d, 1);
@@ -38,7 +46,70 @@
   controls.maxPolarAngle = 1.52;
   controls.autoRotate = false;
   controls.autoRotateSpeed = 0.34;
+  controls.rotateSpeed = isTouch ? 0.85 : 1.0;
+  controls.zoomSpeed = isTouch ? 0.9 : 1.0;
+  controls.panSpeed = isTouch ? 0.85 : 1.0;
   controls.update();
+
+  // ------------------------------------------------------- responsive framing
+  // The diorama is a fixed-size square block (the plinth is 26.3 x 26.3). Seen
+  // from the default three-quarter angle its footprint is ~37 units wide, far
+  // wider than a phone's horizontal field, so the camera must back off until
+  // all four base corners fit. A fixed "scene radius" cannot express that,
+  // so solve the perspective fit for the eight plinth corners instead.
+  const LANDSCAPE_FOV = 36.2;
+  const PORTRAIT_FOV = 50.0;
+  const BASE_HALF = 13.15;
+  const BASE_BOTTOM = -1.36;
+  const BASE_DIR = new THREE.Vector3(-25.9, 16.2, 32.8).normalize();
+  const SAFE = 0.93; // every corner stays inside 93% of the half-frame
+  const camRight = new THREE.Vector3(BASE_DIR.z, 0, -BASE_DIR.x).normalize();
+  const camUp = new THREE.Vector3().crossVectors(camRight, BASE_DIR.clone().negate()).normalize();
+  let currentDistance = camera.position.distanceTo(controls.target);
+
+  function frameDistance() {
+    const aspect = W() / H();
+    const portrait = aspect < 0.85;
+    const fov = portrait ? PORTRAIT_FOV : LANDSCAPE_FOV;
+    const vTan = Math.tan(THREE.MathUtils.degToRad(fov / 2));
+    const hTan = vTan * aspect;
+
+    // Camera sits at target + BASE_DIR * d, so a corner p (relative to the
+    // target) is seen at depth d - p·BASE_DIR. The corner stays on screen when
+    //   |p·right| <= SAFE * hTan * depth   and   |p·up| <= SAFE * vTan * depth.
+    // Solve both inequalities for d and keep the largest requirement.
+    let distance = 0;
+    for (let i = 0; i < 8; i++) {
+      const p = new THREE.Vector3(
+        (i & 1) ? BASE_HALF : -BASE_HALF,
+        (i & 2) ? 0 : BASE_BOTTOM,
+        (i & 4) ? BASE_HALF : -BASE_HALF
+      ).sub(controls.target);
+      const depthOffset = p.dot(BASE_DIR);
+      distance = Math.max(
+        distance,
+        Math.abs(p.dot(camRight)) / (SAFE * hTan) + depthOffset,
+        Math.abs(p.dot(camUp)) / (SAFE * vTan) + depthOffset
+      );
+    }
+    return { fov: fov, portrait: portrait, distance: distance };
+  }
+
+  function applyFraming(forceDistance) {
+    const fit = frameDistance();
+    camera.fov = fit.fov;
+    camera.aspect = W() / H();
+    camera.updateProjectionMatrix();
+    controls.minDistance = fit.distance * 0.45;
+    controls.maxDistance = fit.distance * 2.4;
+    if (forceDistance) {
+      currentDistance = fit.distance;
+      camera.position.copy(controls.target).addScaledVector(BASE_DIR, currentDistance);
+    }
+    controls.update();
+  }
+
+  applyFraming(true);
 
   // Stop the lazy orbit the moment the visitor takes over.
   let touched = false;
@@ -369,6 +440,11 @@
     // real-time rain, started only after the shell has mostly assembled
     createRain();
     buildEnd = 10.7;
+    // Start the frame-rate probe now: decoding the embedded GLB blocks the
+    // main thread, and counting that stall would drop the render scale on
+    // phones that are perfectly capable.
+    frames = 0;
+    qualityCheckedAt = performance.now() + 6000;
     console.log('Rainy konbini loaded:', items.length, 'parts');
   }
 
@@ -386,7 +462,7 @@
 
   // ------------------------------------------------------------ rain
   let rain = null, rainPositions = null, rainSpeeds = null;
-  const RAIN_COUNT = 1450;
+  const RAIN_COUNT = isTouch ? 850 : 1450;
   const RAIN_TOP = 25;
   const RAIN_RADIUS = 22;
 
@@ -495,7 +571,7 @@
   let bloomPass = null;
   try {
     composer = new THREE.EffectComposer(renderer);
-    composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.4));
+    composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouch ? 1.0 : 1.4));
     composer.addPass(new THREE.RenderPass(scene, camera));
     bloomPass = new THREE.UnrealBloomPass(
       new THREE.Vector2(W(), H()), 0.46, 0.58, 1.02
@@ -520,15 +596,89 @@
     sky.position.copy(camera.position);
     if (composer) composer.render();
     else renderer.render(scene, camera);
+    watchPerformance(now);
   }
   requestAnimationFrame(animate);
 
-  window.addEventListener('resize', function () {
+  // ------------------------------------------------------- sizing / gestures
+  let wasPortrait = (W() / H()) < 0.85;
+  function resize() {
+    const fit = frameDistance();
+    camera.fov = fit.fov;
     camera.aspect = W() / H();
     camera.updateProjectionMatrix();
-    renderer.setSize(W(), H());
+    renderer.setSize(W(), H(), false);
     if (composer) composer.setSize(W(), H());
+    controls.minDistance = fit.distance * 0.45;
+    controls.maxDistance = fit.distance * 2.4;
+    // Re-fit when the device rotates between portrait and landscape, or when
+    // the visitor has not orbited yet. Otherwise keep their chosen framing.
+    if (!touched || fit.portrait !== wasPortrait) {
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      if (dir.lengthSq() < 1e-6) dir.copy(BASE_DIR);
+      camera.position.copy(controls.target).addScaledVector(dir, fit.distance);
+      currentDistance = fit.distance;
+    }
+    wasPortrait = fit.portrait;
+    controls.update();
+  }
+
+  let resizeQueued = false;
+  function queueResize() {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(function () {
+      resizeQueued = false;
+      resize();
+    });
+  }
+
+  window.addEventListener('resize', queueResize);
+  window.addEventListener('orientationchange', function () {
+    setTimeout(queueResize, 260);
   });
+  if (viewport) {
+    viewport.addEventListener('resize', queueResize);
+    viewport.addEventListener('scroll', queueResize);
+  }
+
+  // Mobile browsers: no long-press menu, no double-tap page zoom.
+  renderer.domElement.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  let lastTap = 0;
+  renderer.domElement.addEventListener('touchend', function (e) {
+    const now = Date.now();
+    if (now - lastTap < 300) e.preventDefault();
+    lastTap = now;
+  }, { passive: false });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+  document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+
+  // Low-end phones: drop internal resolution once if the frame rate sags.
+  let frames = 0;
+  let slowWindows = 0;
+  let qualityCheckedAt = performance.now() + 6000;
+  function watchPerformance(now) {
+    frames++;
+    if (now < qualityCheckedAt) return;
+    const fps = frames / ((now - (qualityCheckedAt - 6000)) / 1000);
+    frames = 0;
+    qualityCheckedAt = now;
+    if (fps < 40 && dprCap > 1.0) {
+      dprCap = 1.0;
+      renderer.setPixelRatio(1);
+      renderer.setSize(W(), H(), false);
+      if (composer) composer.setPixelRatio(1);
+      console.log('Konbini: lowered render scale for smoother playback (' + fps.toFixed(1) + ' fps)');
+      return;
+    }
+    if (fps < 30 && bloomPass) {
+      slowWindows++;
+      if (slowWindows >= 2 && bloomPass.enabled) {
+        bloomPass.enabled = false;
+        console.log('Konbini: disabled bloom for smoother playback');
+      }
+    }
+  }
 
   // Optional debug hook (not exposed as UI).
   window.__KONBINI__ = { scene: scene, camera: camera, controls: controls, renderer: renderer, composer: composer };
