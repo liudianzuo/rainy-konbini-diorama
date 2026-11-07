@@ -139,10 +139,6 @@ def build_materials():
     M["lamp_glass"] = emission_material("LampGlass", (1.0, 0.68, 0.34), 3.8, base=(0.04, 0.018, 0.005))
     M["headlight"] = emission_material("Headlight", (1.0, 0.82, 0.55), 6.0)
     M["rain"] = glass_material("RainStreak", (0.62, 0.80, 1.0), alpha=.30, reflect=.2)
-    M["fake_reflect_green"] = emission_material("ReflectGreen", (0.05, 0.55, 0.30), .7, base=(0.03, 0.2, 0.1))
-    M["fake_reflect_pink"] = emission_material("ReflectPink", (1.0, 0.12, 0.42), .65, base=(0.4, 0.05, 0.18))
-    M["fake_reflect_cyan"] = emission_material("ReflectCyan", (0.15, 0.7, 1.0), .6, base=(0.05, 0.25, 0.4))
-    M["fake_reflect_warm"] = emission_material("ReflectWarm", (1.0, 0.66, 0.32), .6, base=(0.4, 0.25, 0.1))
     # Product colours
     prod_colors = [
         (0.86, 0.14, 0.12), (0.95, 0.52, 0.10), (0.95, 0.80, 0.16),
@@ -292,22 +288,11 @@ def build_street():
     ]
     for name, (x, y), pts in puddles:
         polygon(name, (x, y, .042), pts, M["puddle"], "01_Street")
-        # thin fake neon reflection in puddle
-        if name in ("Puddle1", "Puddle5"):
-            box(name+"_glow1", (x-.3, y, .047), (1.0, .055, .005), M["fake_reflect_green"], "01_Street", rot=(0,0,-.12))
-            box(name+"_glow2", (x+.55, y+.18, .047), (.55, .045, .005), M["fake_reflect_warm"], "01_Street", rot=(0,0,.15))
-        if name == "Puddle2":
-            box(name+"_glow", (x-.1, y, .047), (.9, .06, .005), M["fake_reflect_cyan"], "01_Street", rot=(0,0,.2))
-        if name == "Puddle3":
-            box(name+"_glow", (x, y, .047), (1.3, .055, .005), M["fake_reflect_pink"], "01_Street", rot=(0,0,-.2))
         # concentric ripples
         for k in range(2):
             torus(name+f"_ripple{k}", (x+random.uniform(-.5,.5), y+random.uniform(-.4,.4), .046),
                   .18 + k*.16, .006, M["ripple"], "01_Street", rot=(0,0,0),
                   major_segments=20, minor_segments=4)
-    # wet reflection streaks on road from crosswalk
-    for i in range(4):
-        box(f"CrosswalkRefl{i}", (8.5, -10.2 + i*.9, .039), (2.8, .10, .006), M["fake_reflect_warm"], "01_Street")
 
     # tactile paving at corner
     for i in range(7):
@@ -332,6 +317,46 @@ def window_frame(name, x, y, z, w, h, mat, collection="02_Building", facing='S',
         box(name+"_bot", (x, y, z+t/2), (depth, w, t), mat, collection, bevel=.008)
         box(name+"_l", (x, y-w/2+t/2, z+h/2), (depth, t, h), mat, collection, bevel=.008)
         box(name+"_r", (x, y+w/2-t/2, z+h/2), (depth, t, h), mat, collection, bevel=.008)
+
+
+def upper_window(name, x, y, z, w, h, facing='S', cool=False):
+    """Second-floor window with real glazing depth: a glass pane in front of a
+    softly lit curtain (so the warm room light reads through the glass), a
+    diagonal glass reflection, plus frame, mullion, transom and sill."""
+    g = glass_material(name + "Glass", (0.26, 0.26, 0.24), .34)
+    sheen = glass_material(name + "Sheen", (0.60, 0.70, 0.80), .45)
+    curtain = M["cool_window"] if cool else M["warm_curtain"]
+    fold = M["cool_window2"] if cool else M["warm_curtain2"]
+    if facing == 'S':
+        # glazing plane at y (south face normal -Y); curtain sits behind it
+        box(name+"_glass", (x, y, z), (w, .05, h), g, "02_Building", anchor='BOTTOM')
+        window_frame(name+"_frame", x, y - .02, z - .06, w + .16, h + .12,
+                     M["steel_dark"], "02_Building", facing='S')
+        box(name+"_curtain", (x, y + .05, z + .02), (w*.94, .012, h - .05),
+            curtain, "02_Building", anchor='BOTTOM')
+        for i, fx in enumerate([-.24, .24]):
+            box("%s_fold%d" % (name, i), (x + w*fx, y + .043, z + .03),
+                (w*.10, .008, h - .10), fold, "02_Building", anchor='BOTTOM')
+        box(name+"_sheen", (x, y - .035, z + h*.52), (w*.56, .01, .075), sheen,
+            "02_Building", rot=(0, 38*D2R, 0))
+        box(name+"_mullion", (x, y - .04, z + h*.5), (.04, .03, h*.94), M["steel_dark"], "02_Building")
+        box(name+"_transom", (x, y - .04, z + h*.55), (w*.94, .03, .035), M["steel_dark"], "02_Building")
+        box(name+"_sill", (x, y - .09, z - .09), (w + .22, .18, .05), M["concrete"], "02_Building")
+    else:
+        # east face normal +X, glazing plane at x
+        box(name+"_glass", (x, y, z), (.05, w, h), g, "02_Building", anchor='BOTTOM')
+        window_frame(name+"_frame", x + .02, y, z - .06, w + .16, h + .12,
+                     M["steel_dark"], "02_Building", facing='E')
+        box(name+"_curtain", (x - .05, y, z + .02), (.012, w*.94, h - .05),
+            curtain, "02_Building", anchor='BOTTOM')
+        for i, fy in enumerate([-.24, .24]):
+            box("%s_fold%d" % (name, i), (x - .043, y + w*fy, z + .03),
+                (.008, w*.10, h - .10), fold, "02_Building", anchor='BOTTOM')
+        box(name+"_sheen", (x + .035, y, z + h*.52), (.01, w*.56, .075), sheen,
+            "02_Building", rot=(38*D2R, 0, 0))
+        box(name+"_mullion", (x + .04, y, z + h*.5), (.03, .04, h*.94), M["steel_dark"], "02_Building")
+        box(name+"_transom", (x + .04, y, z + h*.55), (.03, w*.94, .035), M["steel_dark"], "02_Building")
+        box(name+"_sill", (x + .09, y, z - .09), (.18, w + .22, .05), M["concrete"], "02_Building")
 
 
 def build_store_shell():
@@ -417,27 +442,14 @@ def build_store_shell():
     for i, x in enumerate([-5.7, -4.55, -3.4, -2.25, -1.6]):
         box(f"BalconyPost{i}", (x, -3.39, 4.80), (.045, .045, .56), M["steel"], "02_Building", anchor='BOTTOM')
     # sliding glass door on balcony
-    box("BalconyDoor", (-4.1, -2.36, 4.78), (2.0, .06, 1.62), glass_material("BalconyGlass", (0.30, 0.24, 0.16), .28),
-        "02_Building", anchor='BOTTOM')
-    window_frame("BalconyDoorFrame", -4.1, -2.32, 4.72, 2.10, 1.76, M["steel_dark"], "02_Building", facing='S', depth=.10)
+    upper_window("BalconyDoor", -4.1, -2.40, 4.78, 2.0, 1.62, 'S')
     # second upper window
-    box("UpperWindow1", (0.1, -2.38, 4.86), (1.25, .06, 1.45), glass_material("UpperGlass1", (0.30, 0.22, 0.14), .30),
-        "02_Building", anchor='BOTTOM')
-    window_frame("UpperWindow1_frame", 0.1, -2.34, 4.80, 1.40, 1.58, M["steel_dark"], "02_Building", facing='S')
+    upper_window("UpperWindow1", 0.1, -2.40, 4.86, 1.25, 1.45, 'S')
     for i, x in enumerate([-7.8, -7.0]):
-        box(f"UpperWindow2_{i}", (x, -2.38, 4.90), (1.0, .06, 1.25), glass_material(f"UpperGlass2_{i}", (0.28, 0.2, 0.12), .35),
-            "02_Building", anchor='BOTTOM')
-        window_frame(f"UpperWindow2Frame_{i}", x, -2.34, 4.84, 1.12, 1.36, M["steel_dark"], "02_Building", facing='S')
+        # one warm room, one cool room behind the two small windows
+        upper_window(f"UpperWindow2_{i}", x, -2.40, 4.90, 1.0, 1.25, 'S', cool=(i == 1))
     # east upper window
-    box("UpperWindowE", (2.08, 3.0, 4.86), (.06, 1.6, 1.35), glass_material("UpperGlassE", (0.30, 0.22, 0.15), .3),
-        "02_Building", anchor='BOTTOM')
-    window_frame("UpperWindowEFrame", 2.10, 3.0, 4.80, 1.70, 1.48, M["steel_dark"], "02_Building", facing='E')
-    # warm curtains behind the upstairs glazing (no people, but a home feels lived in)
-    box("CurtainBalcony", (-4.1, -2.45, 4.78), (1.85, .02, 1.54), M["warm_curtain"], "02_Building", anchor='BOTTOM')
-    box("CurtainWin1", (0.1, -2.45, 4.86), (1.12, .02, 1.36), M["warm_curtain"], "02_Building", anchor='BOTTOM')
-    box("CurtainWin2a", (-7.8, -2.45, 4.90), (.92, .02, 1.16), M["warm_curtain"], "02_Building", anchor='BOTTOM')
-    box("CurtainWin2b", (-7.0, -2.45, 4.90), (.92, .02, 1.16), M["cool_window"], "02_Building", anchor='BOTTOM')
-    box("CurtainE", (2.045, 3.0, 4.86), (.02, 1.48, 1.24), M["warm_curtain"], "02_Building", anchor='BOTTOM')
+    upper_window("UpperWindowE", 2.09, 3.0, 4.86, 1.6, 1.35, 'E')
     point_light("UpperRoomGlow", (-2.8, -1.5, 5.5), 30, (1.0,0.55,0.22), .4)
 
     # utility details on facade
@@ -848,7 +860,10 @@ def build_extra_materials():
     M["neighbor2"] = material("NeighborFacade2", (0.14, 0.13, 0.12), rough=.82)
     M["shutter"] = material("Shutter", (0.22, 0.24, 0.25), rough=.55, metallic=.5)
     M["warm_curtain"] = emission_material("WarmCurtain", (1.0, 0.62, 0.28), .75, base=(0.7, 0.4, 0.2))
+    M["warm_curtain2"] = emission_material("WarmCurtain2", (0.95, 0.58, 0.26), .62, base=(0.7, 0.4, 0.2))
+    M["warm_curtain3"] = emission_material("WarmCurtain3", (0.72, 0.44, 0.20), .46, base=(0.5, 0.3, 0.15))
     M["cool_window"] = emission_material("CoolWindow", (0.35, 0.55, 0.95), .45, base=(0.1, 0.2, 0.4))
+    M["cool_window2"] = emission_material("CoolWindow2", (0.28, 0.46, 0.85), .34, base=(0.08, 0.16, 0.34))
     M["noren"] = material("NorenIndigo", (0.035, 0.075, 0.14), rough=.9)
     M["gold"] = material("WarmGold", (0.80, 0.54, 0.18), rough=.32, metallic=.55)
     M["red_paint"] = material("PostBoxRed", (0.62, 0.04, 0.03), rough=.38)
@@ -1478,39 +1493,8 @@ def build_ground_reflections():
         for k in range(2):
             torus(f"{name}Ripple{k}", (x+random.uniform(-.7,.7), y+random.uniform(-.5,.5), .046),
                   .22+k*.25, .008, M["ripple"], "01_Street", major_segments=22, minor_segments=4)
-    # long neon reflections, strongest in the foreground
-    strips = [
-        ("ReflectWarm1", (-3.3, -4.15, .163), (4.8, .10, .006), M["fake_reflect_warm"], 0),
-        ("ReflectGreen", (-7.8, -4.55, .164), (2.0, .08, .006), M["fake_reflect_green"], -.08),
-        ("ReflectPink", (-10.6, -2.10, .164), (1.2, .10, .006), M["fake_reflect_pink"], .3),
-        ("ReflectCyan", (4.8, -4.55, .164), (1.8, .08, .006), M["fake_reflect_cyan"], .2),
-        ("ReflectWarm2", (-9.4, -7.7, .048), (.22, 3.5, .006), M["fake_reflect_warm"], .02),
-        ("ReflectWarm3", (-8.2, -8.8, .048), (.14, 2.2, .006), M["fake_reflect_warm"], -.02),
-        ("ReflectRed", (3.55, -7.4, .048), (.18, 3.2, .006), M["fake_reflect_pink"], -.01),
-        ("ReflectRed2", (4.05, -7.7, .048), (.10, 2.0, .006), M["fake_reflect_pink"], .02),
-        ("ReflectBlue", (7.9, -7.0, .048), (.18, 2.8, .006), M["fake_reflect_cyan"], 0),
-        ("ReflectGreen2", (-9.2, -7.2, .048), (.16, 2.6, .006), M["fake_reflect_green"], .02),
-        ("ReflectPink2", (-9.8, -6.8, .048), (.11, 1.8, .006), M["fake_reflect_pink"], -.02),
-    ]
-    for name, loc, size, mat, rz in strips:
-        box(name, loc, size, mat, "01_Street", rot=(0,0,rz))
-    # glow pool from the store
+    # soft warm wash from the storefront (no painted neon strips on the road)
     box("StoreGlowPool", (-3.2, -4.2, .163), (7.0, 2.1, .004), M["reflection_pool"], "01_Street")
-    # broken reflections beneath sign / vending machines
-    for i in range(10):
-        x = -8.2 + random.uniform(0, 10.2)
-        y = -4.6 + random.uniform(-.35, .35)
-        box(f"SignRefl{i}", (x, y, .042), (random.uniform(.25,.7), .035, .005),
-            M["fake_reflect_green" if i%3 else "fake_reflect_warm"], "01_Street")
-    for i in range(6):
-        box(f"VendRefl{i}", (3.9+random.uniform(-.35,.35), -5.5-i*.20, .048),
-            (.12, random.uniform(.25,.55), .005), M["fake_reflect_pink" if i%2 else "fake_reflect_cyan"], "01_Street")
-    # small wet glints / splash specks
-    for i in range(40):
-        x = random.uniform(-12, 12)
-        y = random.uniform(-12.5, -5.8)
-        box(f"RoadGlint{i}", (x, y, .049), (random.uniform(.06,.22), random.uniform(.012,.035), .004),
-            M["fake_reflect_warm" if i%2 else "fake_reflect_cyan"], "01_Street", rot=(0,0,random.uniform(-.4,.4)))
 
 
 # ------------------------------------------------------------------ scheduling
