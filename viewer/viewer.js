@@ -367,6 +367,40 @@
   let buildEnd = 0;
   let loaded = false;
 
+  // Windows: give the flat emissive curtain planes a soft radial falloff (in
+  // world space) so the room light reads as light coming through fabric and
+  // glass, instead of a painted panel. Cloned per window so each pane gets its
+  // own centre/radius.
+  function windowGlowMaterial(mesh) {
+    mesh.updateWorldMatrix(true, false);
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const box = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(0.05, box.getSize(new THREE.Vector3()).length() * 0.5);
+    const mat = mesh.material.clone();
+    mat.onBeforeCompile = function (shader) {
+      shader.uniforms.uWinCenter = { value: center };
+      shader.uniforms.uWinRadius = { value: radius };
+      shader.vertexShader = 'varying vec3 vWinWorld;\n' + shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n  vWinWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+      );
+      shader.fragmentShader = [
+        'uniform vec3 uWinCenter;',
+        'uniform float uWinRadius;',
+        'varying vec3 vWinWorld;',
+        shader.fragmentShader.replace(
+          '#include <fog_fragment>',
+          'float winD = length(vWinWorld - uWinCenter) / uWinRadius;\n' +
+          'float winGlow = smoothstep(1.12, 0.05, winD);\n' +
+          'gl_FragColor.rgb *= 0.42 + 0.78 * winGlow;\n' +
+          '#include <fog_fragment>'
+        )
+      ].join('\n');
+    };
+    return mat;
+  }
+
   function decodeBase64(b64) {
     const bin = atob(b64);
     const len = bin.length;
@@ -384,6 +418,11 @@
       if (!o.isMesh) return;
       if (!interiorRegex.test(o.name)) outlineCandidates.push(o);
       o.material = interiorRegex.test(o.name) ? convertInteriorMaterial(o.material) : convertMaterial(o.material);
+      // Window light: add a soft falloff to curtain / window glow materials.
+      if (o.material && o.material.userData && o.material.userData.isEmissive &&
+          /Curtain|Window/.test(o.material.name || '')) {
+        o.material = windowGlowMaterial(o);
+      }
       o.frustumCulled = true;
       o.castShadow = false;
       o.receiveShadow = false;
