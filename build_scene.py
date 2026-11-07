@@ -1030,25 +1030,81 @@ def build_street_lamp():
 
 
 def utility_pole(name, x, y, height, radius=.18, with_arms=True):
-    cylinder(name+"_pole", (x, y, 0.0), radius, height, M["concrete"], "05_Utility",
-             vertices=16, radius2=radius*.62, anchor='BOTTOM')
-    cylinder(name+"_base", (x, y, 0.0), radius*1.35, .45, M["concrete_dark"], "05_Utility", vertices=16, anchor='BOTTOM')
-    for i, z in enumerate([height*.55, height*.72, height*.88]):
-        cylinder(name+f"_band{i}", (x, y, z), radius*(1.0-.1*i), .035, M["steel_dark"], "05_Utility", vertices=14)
+    """Concrete Japanese utility pole: tapered shaft, step bolts, three braced
+    crossarms with ceramic insulators, transformer with radiators, fuse cutouts,
+    pole plate, poster and reflective wrap."""
+    top_r = radius * .62
+    # scene_lib.cylinder() keeps the mesh centred on the object origin, so every
+    # part below is placed by its centre (bottom + depth/2) to make it sit at the
+    # intended height instead of sinking into the ground.
+    cylinder(name+"_pole", (x, y, height*.5), radius, height, M["concrete"], "05_Utility",
+             vertices=16, radius2=top_r)
+    cylinder(name+"_base", (x, y, .225), radius*1.35, .45, M["concrete_dark"], "05_Utility",
+             vertices=16)
+    cylinder(name+"_cap", (x, y, height + .035), top_r*1.2, .07, M["concrete_dark"], "05_Utility",
+             vertices=16)
+
+    # step bolts every 45 cm, alternating around the shaft
+    steps = max(4, int((height - 1.4) / 0.45))
+    for i in range(steps):
+        z = .80 + i * .45
+        r = radius + (top_r - radius) * (z / height)
+        along_x = (i % 2 == 0)
+        cylinder("%s_step%d" % (name, i), (x, y, z), .012, r*2 + .13, M["steel_dark"],
+                 "05_Utility", vertices=8, rot=(0, 90*D2R, 0) if along_x else (90*D2R, 0, 0))
+
     if with_arms:
-        for ai, z in enumerate([height*.80, height*.87, height*.94]):
-            box(name+f"_arm{ai}", (x, y, z), (2.2 if ai==0 else 1.7, .10, .10), M["steel_dark"], "05_Utility", bevel=.01)
-            for k, off in enumerate([-.85, 0, .85]):
-                cylinder(name+f"_ins{ai}_{k}", (x+off, y, z+.08), .075, .16, M["white"], "05_Utility",
-                         vertices=10, anchor='BOTTOM')
-    # transformer
-    cylinder(name+"_transformer", (x+.30, y, height*.60), .24, .72, M["steel"], "05_Utility", vertices=16, anchor='BOTTOM')
-    box(name+"_fuse", (x-.26, y-.01, height*.58), (.30, .24, .48), M["steel_dark"], "05_Utility", bevel=.02, anchor='BOTTOM')
-    # pole plate and posters
+        for ai, (hf, w) in enumerate([(0.800, 2.35), (0.875, 1.95), (0.945, 1.55)]):
+            z = height * hf
+            box("%s_arm%d" % (name, ai), (x, y, z), (w, .09, .09), M["steel_dark"],
+                "05_Utility", bevel=.008)
+            # angle-steel braces from the shaft up to the arm ends
+            for s in (-1, 1):
+                tube("%s_brace%d%s" % (name, ai, 'L' if s < 0 else 'R'),
+                     [(x, y, z - .58), (x + s*(w*.5 - .20), y, z - .05)],
+                     .020, M["steel_dark"], "05_Utility")
+            for k, ox in enumerate([-w*.5 + .30, 0.0, w*.5 - .30]):
+                cx = x + ox
+                cylinder("%s_ins%d_%d" % (name, ai, k), (cx, y, z + .14), .075, .16,
+                         M["white"], "05_Utility", vertices=12)
+                cylinder("%s_inscap%d_%d" % (name, ai, k), (cx, y, z + .24), .098, .04,
+                         M["white"], "05_Utility", vertices=12)
+
+    # transformer drum with four radiators and three bushings
+    tz = height * .615
+    tx = x + .34
+    cylinder(name+"_transformer", (tx, y, tz + .40), .255, .80, M["steel"], "05_Utility",
+             vertices=16)
+    for i, (dx, dy, sx, sy) in enumerate([(.265, 0, .05, .34), (-.265, 0, .05, .34),
+                                          (0, .265, .34, .05), (0, -.265, .34, .05)]):
+        box("%s_fin%d" % (name, i), (tx + dx, y + dy, tz + .40), (sx, sy, .62),
+            M["steel_dark"], "05_Utility")
+    for i, ox in enumerate([-.13, 0.0, .13]):
+        cylinder("%s_bushing%d" % (name, i), (tx + ox, y, tz + .875), .042, .15,
+                 M["white"], "05_Utility", vertices=10)
+        cylinder("%s_bushcap%d" % (name, i), (tx + ox, y, tz + .965), .055, .03,
+                 M["steel_dark"], "05_Utility", vertices=10)
+    for i, sz in enumerate([tz + .18, tz + .64]):
+        torus("%s_strap%d" % (name, i), (x, y, sz), radius + .012, .020,
+              M["steel_dark"], "05_Utility", major_segments=18, minor_segments=4)
+        box("%s_trbar%d" % (name, i), (x + .19, y, sz), (.34, .05, .05),
+            M["steel_dark"], "05_Utility")
+
+    # drop-out fuse cutouts on the opposite side, just under the top arm
+    fx = x - .32
+    box(name+"_fusebar", (fx, y, height*.885), (.07, .36, .05), M["steel_dark"], "05_Utility")
+    for i, oy in enumerate([-.11, 0.0, .11]):
+        cylinder("%s_fuse%d" % (name, i), (fx, y + oy, height*.885 + .15), .030, .22,
+                 M["white"], "05_Utility", vertices=8)
+
+    # pole plate, poster and reflective wrap
     box(name+"_plate", (x-.20, y-.01, 2.45), (.02, .22, .30), M["sign_blue"], "05_Utility", anchor='BOTTOM')
     text_obj(name+"_plateText", "星見町", (x-.215, y, 2.55), .085, M["unlit_white"], "05_Utility",
              rot=(90*D2R,0,90*D2R), extrude=.001, font=L.FONT_JP)
     box(name+"_poster", (x-.20, y+.12, 1.55), (.015, .34, .48), M["sign_white_soft"], "05_Utility", anchor='BOTTOM')
+    for i, wz in enumerate([1.08, 1.19]):
+        cylinder("%s_wrap%d" % (name, i), (x, y, wz), radius*1.03, .045,
+                 M["white"], "05_Utility", vertices=16)
     return (x, y, height*.94)
 
 
